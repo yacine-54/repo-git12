@@ -1,0 +1,79 @@
+---
+- hosts: localhost
+  become: True
+
+  tasks:
+    - name : Création des clés SSH de gestion
+      community.crypto.openssh_keypair: 
+        path : /home/ubuntu/nodes.key 
+        size : 2048
+    - name : chmod keypair
+      ansible.builtin.file:
+        path: /home/ubuntu/nodes.key 
+        mode: 0600
+        owner: ubuntu
+        group: ubuntu
+
+- hosts: all
+  become: True
+  vars_prompt:
+    - name: "my_password"
+      prompt: "Enter password"
+      private: yes
+      encrypt: "sha512_crypt"
+      confirm: yes
+      salt_size: 7
+  tasks:
+    - debug:
+        msg: password is {{ my_password }}
+
+    - name: Ensure group "ansible" exists
+      ansible.builtin.group:
+        name: ansible
+        state: present
+
+    - name: Add the user 'ansible' with a specific uid and a primary group of 'ansible'
+      ansible.builtin.user:
+        name: ansible
+        comment: Ansible User
+        group : ansible 
+        createhome: yes 
+        shell: /bin/bash
+        password : "{{ my_password }}"
+
+    - name: Allow password authentication
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^PasswordAuthentication"
+        line: "PasswordAuthentication yes"
+        state: present
+      notify: restart sshd
+
+    # - name: Enable Root Login
+    #  lineinfile:
+    #        dest: /etc/ssh/sshd_config
+    #        regexp: '^PermitRootLogin'
+    #        line: "PermitRootLogin yes"
+    #        state: present
+    #        backup: yes
+    #   notify: restart sshd
+    
+    - name: Add the user 'ansible' in sudoers
+      community.general.sudoers:
+        name: ansible
+        user: ansible 
+        commands: ALL 
+        nopassword: yes 
+        state: present
+        
+    - name: Add public Key in autorized key
+      ansible.posix.authorized_key:
+        user : ansible 
+        state: present
+        key: "{{ lookup('file', '/home/ubuntu/nodes.key.pub') }}"
+      
+  handlers:
+    - name: restart sshd
+      service:
+        name: sshd
+        state: restarted
